@@ -242,6 +242,7 @@ export class Game {
     const t = this.teams[this.half];
     this.hud.message(`${this.inning}회${this.half ? '말' : '초'}`, `${t.name} 공격`, this.half ? 'gold' : 'blue', 1.8);
     this.hud.log(`<b>${this.inning}회${this.half ? '말' : '초'}</b> ${t.name} 공격`);
+    this.cutNext = true;
     this.newBatter();
     this.env.stadium.crowd.cheer(0.6, 2);
     if (first) this.audio.whistle();
@@ -345,13 +346,15 @@ export class Game {
     this.pushScore();
     this.hud.pitchInfo(null);
     this.hud.hintMark(0, 0, false);
+    const cutCam = this.cutNext;
+    this.cutNext = false;
     if (this.userBatting) {
-      this.rig.shot(BAT_CAM.pos, BAT_CAM.look, { fov: BAT_CAM.fov, stiff: 5 });
+      this.rig.shot(BAT_CAM.pos, BAT_CAM.look, { fov: BAT_CAM.fov, stiff: 5, cut: cutCam });
       this.refreshActionBar();
       this.hud.hint('마우스로 커서 이동 · <b>클릭/Space</b> 스윙 · Shift 파워 · C 컨택 · B 번트');
       this.cpuPitchDelay = 1.1 + Math.random() * 0.9;
     } else {
-      this.rig.shot(PITCH_CAM.pos, PITCH_CAM.look, { fov: PITCH_CAM.fov, stiff: 5 });
+      this.rig.shot(PITCH_CAM.pos, PITCH_CAM.look, { fov: PITCH_CAM.fov, stiff: 5, cut: cutCam });
       this.refreshPitchMenu();
       this.hud.hint('구종 선택 · 마우스로 코스 조준 · <b>클릭</b>으로 투구 게이지 시작');
     }

@@ -437,6 +437,7 @@ export class FX {
   }
 
   update(realDt) {
+    realDt = Math.max(0, realDt || 0);
     // time scale management
     let scale = 1;
     if (this.slowmo) {

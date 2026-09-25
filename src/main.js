@@ -101,7 +101,7 @@ renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 window.__game = game;
 window.__env = env;
 
-const timer = new THREE.Timer();
+let lastT = performance.now();
 const TEST = new URLSearchParams(location.search).has('test');
 function step(realDt) {
   const dt = fx.update(realDt);
@@ -113,9 +113,11 @@ function render() {
   updateParticleScale();
   composer.render();
 }
-function frame(t) {
-  timer.update(t);
-  step(Math.min(0.05, timer.getDelta()));
+function frame() {
+  const now = performance.now();
+  const dt = THREE.MathUtils.clamp((now - lastT) / 1000, 0, 0.05);
+  lastT = now;
+  step(dt);
   render();
   requestAnimationFrame(frame);
 }
