@@ -565,12 +565,12 @@ export class Stadium {
     const panelMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
     panelMat.color.setRGB(6, 5.6, 4.8);
     const spots = [
-      [-58, 45],
-      [58, 45],
-      [-95, 110],
-      [95, 110],
-      [-40, -18],
-      [40, -18],
+      [-50, -50],
+      [50, -50],
+      [-104, 32],
+      [104, 32],
+      [-78, 142],
+      [78, 142],
     ];
     for (const [x, z] of spots) {
       const g = new THREE.Group();

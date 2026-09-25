@@ -93,6 +93,10 @@ export class Play {
   plan(initial = false) {
     const b = this.ball;
     const pred = predictPath(b.p, b.v, b.spin ?? 1, 10);
+    // a ball at rest still needs to be picked up: extend the path with its resting spot
+    const lastS = pred.samples[pred.samples.length - 1];
+    const t0 = lastS ? lastS.t : 0;
+    for (let t = t0 + 0.25; t < 12; t += 0.25) pred.samples.push({ t, p: pred.last.clone(), air: false, h: pred.last.y });
     this.pred = pred;
     let best = null;
     let bestAir = null;
@@ -109,7 +113,7 @@ export class Play {
         const s = pred.samples[i];
         if (s.h > REACH_H + (OUTFIELD.includes(pos) ? 0.9 : 0.3)) continue;
         const r = Math.hypot(s.p.x, s.p.z);
-        if (r > fenceDistance(sprayAngle(s.p.x, s.p.z)) - 0.3 && s.p.z > 0) continue;
+        if (r > fenceDistance(sprayAngle(s.p.x, s.p.z)) + 0.2 && s.p.z > 0) continue;
         if (!isFair(s.p.x, s.p.z) && this.outOfPlayFoul(s.p)) continue;
         const d = Math.max(0, fp.distanceTo(flat(s.p)) - 0.6);
         const need = react + (d > 0 ? d / vmax + 0.25 : 0);
@@ -132,8 +136,8 @@ export class Play {
       // nobody can get there (e.g. a no-doubt homer): nearest fielder heads for the landing spot
       const land = flat(pred.last);
       const r = land.length();
-      const fr = fenceDistance(sprayAngle(land.x, land.z)) - 1.5;
-      if (r > fr) land.setLength(fr);
+      const fr = fenceDistance(sprayAngle(land.x, land.z)) - 0.5;
+      if (r > fr && !pred.homerun) land.setLength(fr);
       let bd = Infinity;
       for (const pos of POS_ORDER) {
         const d = flat(this.F[pos].root.position).distanceTo(land);
@@ -257,10 +261,10 @@ export class Play {
       return;
     }
     const moving = this.activeRunners().some((r) => r.target !== null && !r.waiting);
-    const ballSettled = this.holder && !this.throwing && this.ball.mode === 'held';
+    const ballSettled = (this.holder && !this.throwing && this.ball.mode === 'held') || (this.inFlightThrow && this.inFlightThrow.cutoff);
     if (!moving && ballSettled && this.t > 1.2) {
       this.endTimer += dt;
-      if (this.endTimer > 0.7) return this.finish();
+      if (this.endTimer > 0.55) return this.finish();
     } else this.endTimer = 0;
     if (this.t > 25) return this.finish();
   }
@@ -363,7 +367,8 @@ export class Play {
       this.startJump(f);
       return;
     }
-    if (hd < 0.95 && bp.y < REACH_H + 0.15) {
+    const slow = Math.hypot(ball.v.x, ball.v.z) < 3 && bp.y < 0.5;
+    if ((hd < 0.95 || (slow && hd < 1.4)) && bp.y < REACH_H + 0.15) {
       this.catchBall(f, pos, air);
       return;
     }
@@ -573,6 +578,10 @@ export class Play {
     f.root.rotation.y = Math.atan2(dir.x, dir.z);
     f.play('throw', { fade: 0.08, speed: OUTFIELD.includes(f.pos) ? 1.0 : 1.35 });
     receiver.receiving = true;
+    // glove-to-hand transfer
+    this.g.fx.after(0.08, () => {
+      if (this.ball.mode === 'held' && this.ball.holder?.char === f) this.ball.hold(f, 'R');
+    });
     f.animator.onEvent = (ev) => {
       if (ev !== 'release') return;
       f.animator.onEvent = null;

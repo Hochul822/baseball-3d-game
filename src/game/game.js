@@ -422,8 +422,14 @@ export class Game {
 
   onMouseDown(button, shift) {
     if (this.state === 'title' || this.state === 'over') return;
-    if (this.userBatting) this.userSwing(shift || button === 2);
-    else this.pitchClick();
+    const hit = this.env.input.planeHit(this.camera, CONTACT_Z);
+    if (this.userBatting) {
+      if (hit && !this.autoplay) this.pci.set(clamp(hit.x, -0.62, 0.62), clamp(hit.y, 0.2, 1.5));
+      this.userSwing(shift || button === 2);
+    } else {
+      if (hit && !this.meter && this.state === 'prePitch') this.aim.set(clamp(hit.x, -0.75, 0.75), clamp(hit.y, 0.1, 1.6));
+      this.pitchClick();
+    }
   }
 
   onAction(a) {
@@ -1200,6 +1206,7 @@ export class Game {
         if (this.state !== 'afterPitch') return;
         const C = this.fielders.C;
         C.play('toss', { fade: 0.15 });
+        this.ball.hold(C, 'R');
         C.animator.onEvent = (ev) => {
           if (ev !== 'release') return;
           C.animator.onEvent = null;
@@ -1219,6 +1226,7 @@ export class Game {
     s.coverer = coverer;
     coverer.coverTarget = BASES[target].clone().add(new THREE.Vector3(target === 2 ? 0.5 : -0.3, 0, target === 2 ? -0.6 : -0.5));
     C.play('catcherThrow', { fade: 0.08 });
+    this.fx.after(0.15, () => this.ball.mode === 'held' && this.ball.hold(C, 'R'));
     C.animator.onEvent = (ev) => {
       if (ev !== 'release') return;
       C.animator.onEvent = null;
@@ -1231,6 +1239,13 @@ export class Game {
       this.hitTrail.active = true;
       this.audio.whoosh(0.3);
       s.ballArrive = this.time + dur;
+      const runner = s.runner.char;
+      const base = BASES[target].clone();
+      this.rig.track(() => {
+        const mid = runner.root.position.clone().lerp(base, 0.5);
+        const off = base.clone().sub(new THREE.Vector3(0, 0, 0)).setY(0).normalize();
+        return { pos: mid.clone().add(new THREE.Vector3(-off.z * 9, 4.5, off.x * 9)).add(off.clone().multiplyScalar(-4)), look: mid.clone().setY(1.0), fov: 42 };
+      }, { stiff: 4 });
       this.fx.after(dur, () => {
         this.hitTrail.active = false;
         this.ball.hold(coverer, 'L');
@@ -1390,6 +1405,9 @@ export class Game {
 
   gameOver(walkoff) {
     this.setState('over');
+    this.hud.hint('');
+    this.hud.meter(null);
+    this.hud.pitchInfo(null);
     this.hud.clearBottom();
     this.hud.cursor('none');
     this.hud.drawZone(null, false);
@@ -1455,6 +1473,15 @@ export class Game {
       }
     }
     this.batterRig.update(dt);
+    // everybody on the field follows the ball with their eyes
+    const ballVisible = this.ball.mesh.visible && this.state !== 'title';
+    for (const pos of POS_ORDER) {
+      const f = this.fielders[pos];
+      if (pos === 'P' && (this.state === 'prePitch' || this.state === 'windup')) f.lookAt(new THREE.Vector3(0, 1.0, 0), 0.9);
+      else if (ballVisible) f.lookAt(this.ball.p, 0.8);
+    }
+    for (const ch of this.offense) if (ch.role === 'runner' && ballVisible) ch.lookAt(this.ball.p, 0.7);
+    if (ballVisible) this.umpire.lookAt(this.ball.p, 0.6);
     for (const ch of all) {
       if (!ch.root.visible) continue;
       if (ch.tilt !== undefined || ch.lift !== undefined) {
@@ -1515,7 +1542,8 @@ export class Game {
   // Misc
   // ======================================================================
   titleCam() {
-    this.rig.orbitAround(new THREE.Vector3(0, 0, 20), 40, 14, 0.06, { fov: 50 });
+    // sweep slowly around the home-plate side so the players are front-lit by the sunset
+    this.rig.orbitAround(new THREE.Vector3(0, 0, 22), 42, 12, 0.12, { fov: 50, start: Math.PI * 0.8, swing: 0.55 });
   }
 
   /** Render a quick portrait of a character for cut-ins */

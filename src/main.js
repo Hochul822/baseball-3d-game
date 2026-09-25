@@ -17,10 +17,13 @@ class Input {
     this.keys = new Set();
     this.mouseActive = false;
     this.ray = new THREE.Raycaster();
-    dom.addEventListener('pointermove', (e) => {
+    const track = (e) => {
       this.ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
       this.mouseActive = true;
-    });
+    };
+    dom.addEventListener('pointermove', track);
+    // touch: the tap position doubles as the aim point
+    dom.addEventListener('pointerdown', track);
     window.addEventListener('keydown', (e) => {
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) this.mouseActive = false;
       this.keys.add(e.code);

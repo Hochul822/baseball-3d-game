@@ -43,8 +43,8 @@ export class CameraRig {
     }
   }
 
-  orbitAround(center, radius, height, speed, { fov = 45, start = 0, stiff = 3 } = {}) {
-    this.orbit = { center: center.clone(), radius, height, speed, a: start };
+  orbitAround(center, radius, height, speed, { fov = 45, start = 0, stiff = 3, swing = 0 } = {}) {
+    this.orbit = { center: center.clone(), radius, height, speed, a: start, start, swing, t: 0 };
     this.follow = null;
     this.tFov = fov;
     this.stiff = stiff;
@@ -59,7 +59,8 @@ export class CameraRig {
     }
     if (this.orbit) {
       const o = this.orbit;
-      o.a += o.speed * dt;
+      o.t += dt;
+      o.a = o.swing ? o.start + Math.sin(o.t * o.speed) * o.swing : o.a + o.speed * dt;
       this.tPos.set(o.center.x + Math.sin(o.a) * o.radius, o.center.y + o.height, o.center.z + Math.cos(o.a) * o.radius);
       this.tLook.copy(o.center).add(new THREE.Vector3(0, 1.2, 0));
     }

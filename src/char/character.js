@@ -582,13 +582,17 @@ export class Character {
       const neck = this.bones.neck;
       const hp = _v1.setFromMatrixPosition(head.matrixWorld);
       const dir = _v2.copy(this.lookTarget).sub(hp).normalize();
+      // limit neck twist: fade out when the target is behind the chest
+      const chestFwd = _v4.set(0, 0, 1).transformDirection(this.bones.chest.matrixWorld);
+      const facing = chestFwd.dot(dir);
+      const lim = THREE.MathUtils.smoothstep(facing, -0.25, 0.35);
       // desired world rotation: +Z toward dir
       _m.lookAt(_v3.set(0, 0, 0), dir.negate(), _up);
       const want = _q.setFromRotationMatrix(_m);
       const parentQ = neck.getWorldQuaternion(_q2);
       const local = parentQ.invert().multiply(want);
       // clamp through slerp from animated
-      _q3.copy(head.quaternion).slerp(local, this.lookWeight * 0.7);
+      _q3.copy(head.quaternion).slerp(local, this.lookWeight * 0.75 * lim);
       head.quaternion.copy(_q3);
       head.updateMatrixWorld(true);
     }

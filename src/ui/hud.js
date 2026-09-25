@@ -337,6 +337,7 @@ export class HUD {
   cutin({ ko, en, c1 = '#ff3b6b', c2 = '#5a1bff', side = 'l', portrait = null, dur = 1.5 }) {
     const c = this.layers.cut;
     if (!c) return;
+    if (this.layers.msg) this.layers.msg.innerHTML = '';
     c.className = 'cutin ' + side;
     c.style.setProperty('--c1', c1);
     c.style.setProperty('--c2', c2);
