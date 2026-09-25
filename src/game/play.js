@@ -748,7 +748,8 @@ export class Play {
     }
     if (b === 4) {
       r.scored = true;
-      this.scoreRunner(r);
+      if (g.outs < 3) this.scoreRunner(r);
+      else g.fx.after(1.0, () => g.releaseOffense(r.ch));
       return;
     }
     r.base = b;
@@ -825,12 +826,12 @@ export class Play {
       r.ch.role = 'out';
     }
     // third out on a force / batter-runner: runs on this play don't count
-    if (g.outs >= 3 && (how === 'force' || (r.isBatter && how !== 'fly'))) {
+    if (g.outs >= 3 && (how === 'force' || r.isBatter)) {
       for (const run of this.runs) {
         g.score[g.half]--;
         g.line[g.half][g.inning - 1]--;
       }
-      if (this.runs.length) g.hud.log('3아웃 포스 — 득점 무효');
+      if (this.runs.length) g.hud.log('3아웃 — 득점 무효');
       this.runs = [];
       g.pushScore();
     }
@@ -1029,7 +1030,7 @@ export class Play {
       let b = r.target !== null ? (r.returning ? r.target : Math.max(r.base, r.prog > r.dist * 0.5 ? r.target : r.base)) : r.base;
       if (b === 0) b = 1;
       if (b >= 4) {
-        this.scoreRunner(r);
+        if (g.outs < 3) this.scoreRunner(r);
         continue;
       }
       while (bases[b] && b < 3) b++;

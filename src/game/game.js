@@ -741,7 +741,7 @@ export class Game {
     if (sp) pSwing = inZone ? 0.8 : 0.5;
     if (Math.random() > pSwing) return;
     const skill = (b.contact - 50) / 50; // 0..1
-    const sig = (0.075 - skill * 0.03) * diffMul * (sp ? 2.0 : 1) * (breaking ? 1.25 : 1) * (pc.hang ? 0.6 : 1);
+    const sig = (0.066 - skill * 0.028) * diffMul * (sp ? 2.0 : 1) * (breaking ? 1.25 : 1) * (pc.hang ? 0.6 : 1);
     const tsig = (0.042 - skill * 0.012) * diffMul * (sp ? 1.7 : 1);
     let bias = 0;
     if (pc.def.id === 'CH' || pc.def.id === 'CU' || pc.def.id === 'KN') bias = -0.025;
@@ -860,9 +860,6 @@ export class Game {
 
     if (st === 'prePitch') this.updatePrePitch(dt, realDt);
     if (st === 'windup' || st === 'pitchFlight' || st === 'special') this.updateBattingInput(realDt);
-    if (st === 'windup' && !this.userBatting && this.cpuSwing && false) {
-      // placeholder
-    }
     if (st === 'pitchFlight') this.updatePitchFlight(dt);
     if (st === 'afterPitch') this.updateAfterPitch(dt);
     if (st === 'inPlay' && this.play) {
@@ -1047,7 +1044,7 @@ export class Game {
       spray = gauss() * 0.3 + (cross.x > 0 ? 0.25 : -0.25);
     } else {
       const modeMul = sw.mode === 'power' ? 1.09 : sw.mode === 'contact' ? 0.9 : 1;
-      ev = 17 + 31 * Math.pow(Q, 0.8) * (0.82 + (b.power / 100) * 0.33) * modeMul;
+      ev = 20 + 31 * Math.pow(Q, 0.7) * (0.82 + (b.power / 100) * 0.33) * modeMul;
       la = 11 + (dy / r) * 40 + gauss() * 5 + (sw.mode === 'power' ? 5 : 0) - (sw.mode === 'contact' ? 3 : 0);
       spray = -delta * 7.5 + cross.x * 0.8 + gauss() * 0.1;
       if (sw.mode === 'dragon') {
