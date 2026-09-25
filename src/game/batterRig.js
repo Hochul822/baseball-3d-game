@@ -6,15 +6,15 @@ const SWING_DUR = 0.62;
 const BOX = new THREE.Vector3(0.98, 0, 0.02);
 
 const KNOB_KEYS = [
-  [0.0, [-0.2, 1.42, 0.06]],
-  [0.18, [-0.22, 1.24, 0.16]],
+  [0.0, [-0.12, 1.3, 0.28]],
+  [0.18, [-0.2, 1.22, 0.2]],
   [0.33, null], // contact (computed)
   [0.45, [0.4, 1.0, 0.3]],
   [0.62, [0.28, 1.28, 0.0]],
   [1.0, [0.14, 1.42, -0.1]],
 ];
 const DIR_KEYS = [
-  [0.0, [-0.32, 0.9, -0.28]],
+  [0.0, [-0.35, 0.85, -0.4]],
   [0.18, [-0.93, 0.3, -0.18]],
   [0.33, null],
   [0.45, [0.95, 0.05, 0.35]],
@@ -60,6 +60,25 @@ export class BatterRig {
     this.game.bat.visible = true;
     this.ikWeight = 1;
     this.stance();
+  }
+
+  /** Walking to the plate: bat hangs from the right hand, no IK. */
+  carry(ch) {
+    this.char = ch;
+    this.mode = 'carry';
+    this.batFree = null;
+    this.game.bat.visible = true;
+    this.bunt = false;
+    ch.gripTarget.R = 1;
+  }
+
+  /** Let go of the batter (e.g. after a strikeout) without tossing the bat. */
+  release() {
+    if (!this.char) return;
+    this.mode = 'none';
+    this.returnTimer = 0;
+    this.char.ik.L = this.char.ik.R = null;
+    this.game.bat.visible = false;
   }
 
   stance() {
@@ -180,11 +199,20 @@ export class BatterRig {
       K.lerp(k, Math.min(1, dt * 10));
       D.lerp(d, Math.min(1, dt * 10)).normalize();
       this.topHand = 1;
+    } else if (this.mode === 'carry') {
+      ch.root.updateMatrixWorld(true);
+      const hand = ch.bones.handR;
+      const grip = new THREE.Vector3(0, -0.075, 0.01).applyMatrix4(hand.matrixWorld);
+      const fwd = new THREE.Vector3(0.05, -0.45, 1).normalize().transformDirection(ch.root.matrixWorld);
+      bat.position.copy(grip).addScaledVector(fwd, -0.1);
+      bat.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), fwd);
+      ch.gripTarget.R = 1;
+      return;
     } else if (this.mode === 'stance') {
       const tt = this.game.time;
       const wag = Math.sin(tt * 2.2) * 0.04;
-      const k = new THREE.Vector3(-0.2 + wag * 0.3, 1.42 + Math.sin(tt * 1.3) * 0.01, 0.06);
-      const d = new THREE.Vector3(-0.32 + wag, 0.9, -0.28 + wag * 0.5).normalize();
+      const k = new THREE.Vector3(-0.12 + wag * 0.3, 1.3 + Math.sin(tt * 1.3) * 0.01, 0.28);
+      const d = new THREE.Vector3(-0.35 + wag, 0.85, -0.4 + wag * 0.5).normalize();
       K.lerp(k, Math.min(1, dt * 8));
       D.lerp(d, Math.min(1, dt * 8)).normalize();
       this.topHand = 1;
@@ -204,8 +232,10 @@ export class BatterRig {
       const sh = new THREE.Vector3().setFromMatrixPosition(ch.bones['upperArm' + side].matrixWorld);
       return g.clone().addScaledVector(g.clone().sub(sh).normalize(), -0.07);
     };
+    // lead elbow points down, back elbow up and out ("elbow up" stance); both relax during the swing
+    const sw = this.mode === 'swing' ? Math.min(1, this.t / 0.2) : 0;
     const poleL = new THREE.Vector3(0.55, 0.7, 0.45).applyMatrix4(ch.root.matrixWorld);
-    const poleR = new THREE.Vector3(-0.55, 0.9, 0.0).applyMatrix4(ch.root.matrixWorld);
+    const poleR = new THREE.Vector3(-0.75, 1.35 - sw * 0.55, -0.25 + sw * 0.2).applyMatrix4(ch.root.matrixWorld);
     ch.reach('L', offs(gl, 'L'), this.ikWeight, poleL, { axis: dw });
     ch.reach('R', offs(gr, 'R'), this.ikWeight * (this.topHand ?? 1), poleR, { axis: dw });
   }

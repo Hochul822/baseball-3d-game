@@ -180,14 +180,15 @@ export class Ball {
   pitchPos(t, out = new THREE.Vector3()) {
     const pc = this.pitch;
     out.copy(pc.p0).addScaledVector(pc.v0, t);
-    out.y -= 0.5 * GRAVITY * t * t;
+    out.y -= 0.5 * (pc.g ?? GRAVITY) * t * t;
     // break shaped by 'late' exponent: displacement = 0.5*a*T^2 * (t/T)^(late+1) ... normalised
     const u = Math.min(t / pc.T, 1.4);
     const shape = Math.pow(Math.max(u, 0), pc.late + 1) * 0.5 * pc.T * pc.T;
     out.addScaledVector(pc.brk, shape);
     if (pc.knuckle) {
-      out.x += Math.sin(t * 17 + pc.seed) * 0.05 * u;
-      out.y += Math.sin(t * 13 + pc.seed * 2) * 0.04 * u;
+      const w = 0.42 / pc.T;
+      out.x += Math.sin(t * 17 * w + pc.seed) * 0.05 * u;
+      out.y += Math.sin(t * 13 * w + pc.seed * 2) * 0.04 * u;
     }
     return out;
   }

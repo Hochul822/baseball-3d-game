@@ -23,6 +23,7 @@ const CONTACT_Z = 0.3; // plane where bat meets ball
 const CATCH_Z = -0.82;
 const SWING_CONTACT = 0.205; // seconds from swing start to contact frame
 const SWING_DUR = 0.62;
+const PITCH_GAME_SPEED = { easy: 0.52, normal: 0.6, hard: 0.7 };
 const PITCH_CAM = { pos: new THREE.Vector3(2.3, 2.6, 26.8), look: new THREE.Vector3(-0.15, 1.0, 0), fov: 17 };
 const BAT_CAM = { pos: new THREE.Vector3(-0.42, 2.2, -4.9), look: new THREE.Vector3(0.1, 1.05, 14), fov: 40 };
 
@@ -227,6 +228,7 @@ export class Game {
     for (const r of this.bases) if (r) this.releaseOffense(r.char);
     this.bases = [null, null, null, null];
     this.dressDefense(this.defRoster);
+    this.movers = [];
     for (const ch of this.offense) this.releaseOffense(ch);
     for (const pos of POS_ORDER) {
       const f = this.fielders[pos];
@@ -248,7 +250,7 @@ export class Game {
     if (first) this.audio.whistle();
   }
 
-  newBatter() {
+  newBatter(walkIn = false) {
     const ro = this.offRoster;
     const player = ro.batters[ro.next % 9];
     ro.next++;
@@ -260,11 +262,85 @@ export class Game {
     this.dressOffense(ch, ro, player);
     ch.role = 'batter';
     this.batter = { char: ch, player };
+    this.boardMsg = null;
     this.batterRig.attach(ch);
     ch.root.visible = true;
     this.hud.setMatchup(player, this.defRoster.pitcher, ro.def, this.defRoster.def);
     this.pushScore();
-    this.enterPrePitch();
+    if (walkIn) this.batterWalkIn(ch, player);
+    else this.enterPrePitch();
+  }
+
+  /** Home team uses the 1B (-X) side, visitors the 3B (+X) side. */
+  get dugoutSide() {
+    return this.half === 1 ? -1 : 1;
+  }
+
+  /** The next batter walks from the on-deck area to the box, bat in hand. */
+  batterWalkIn(ch, player) {
+    this.setState('batterChange');
+    this.hud.clearBottom();
+    this.hud.hint('');
+    this.hud.cursor('none');
+    this.hud.pitchInfo(null);
+    this.hud.message('타자 교체', `${player.order}번 타자 · ${player.name}`, this.half ? 'gold' : 'blue', 2.0);
+    this.hud.log(`타석: ${player.order}번 ${player.name}`);
+    const sd = this.dugoutSide;
+    const V = (x, z) => new THREE.Vector3(x, 0, z);
+    const path = sd < 0 ? [V(-4.6, -3.9), V(-1.2, -3.5), V(1.8, -1.7), V(0.98, 0.02)] : [V(5.4, -3.6), V(2.4, -1.4), V(0.98, 0.02)];
+    ch.root.position.copy(path[0]);
+    ch.root.rotation.set(0, 0, 0);
+    ch.tilt = 0;
+    ch.root.visible = true;
+    this.batterRig.carry(ch);
+    this.moveAlong(ch, path.slice(1), 3.0, () => {
+      this.batterRig.attach(ch);
+      this.fx.after(0.35, () => {
+        if (this.state === 'batterChange') this.enterPrePitch();
+      });
+    });
+    // front-of-plate shot that shows both the batter leaving and the one arriving
+    this.rig.shot(new THREE.Vector3(-sd * 6.8, 2.7, 5.2), new THREE.Vector3(sd * 1.0, 1.0, -1.8), { fov: 48, stiff: 3.5, cut: true });
+  }
+
+  /** The batter who just made an out heads back to the dugout. */
+  batterWalkOff(ch) {
+    ch.role = 'leaving';
+    const sd = this.dugoutSide;
+    const V = (x, z) => new THREE.Vector3(x, 0, z);
+    const path = sd < 0 ? [V(1.7, -2.4), V(-1.0, -4.4), V(-9, -6.5)] : [V(3.0, -1.9), V(8, -5.5)];
+    ch.lookAt(null, 0);
+    this.moveAlong(ch, path, 2.4, () => this.releaseOffense(ch), 'walk');
+  }
+
+  moveAlong(ch, path, speed, onDone, clip = 'walk') {
+    this.movers = (this.movers || []).filter((m) => m.ch !== ch);
+    this.movers.push({ ch, path: path.map((p) => p.clone()), speed, onDone, clip });
+    ch.play(clip, { fade: 0.25, speed: speed / 2.3 });
+  }
+
+  updateMovers(dt) {
+    if (!this.movers) return;
+    for (let i = this.movers.length - 1; i >= 0; i--) {
+      const m = this.movers[i];
+      const p = m.ch.root.position;
+      const tgt = m.path[0];
+      const d = new THREE.Vector3().subVectors(tgt, p);
+      d.y = 0;
+      const L = d.length();
+      if (L < 0.06) {
+        m.path.shift();
+        if (!m.path.length) {
+          this.movers.splice(i, 1);
+          m.ch.play('idle', { fade: 0.3 });
+          m.onDone?.();
+        }
+        continue;
+      }
+      d.normalize();
+      p.addScaledVector(d, Math.min(L, m.speed * dt));
+      m.ch.root.rotation.y = lerpAngle(m.ch.root.rotation.y, Math.atan2(d.x, d.z), dt * 8);
+    }
   }
 
   takeOffense() {
@@ -645,11 +721,16 @@ export class Game {
     const p0 = new THREE.Vector3();
     P.handWorld('R', p0);
     p0.z = Math.min(p0.z, RUBBER_Z - 1.3);
-    const speed = (pc.velo / 3.6) * 0.965;
+    // The scoreboard shows the "real" velocity, but the ball travels at a
+    // playable game speed. Gravity and break are scaled by k^2 so every pitch
+    // keeps exactly the same shape, just in slow motion.
+    const k = PITCH_GAME_SPEED[this.diff] ?? 0.62;
+    const speed = (pc.velo / 3.6) * 0.965 * k;
     const target = new THREE.Vector3(pc.target.x, pc.target.y, CONTACT_Z);
     const dist = p0.z - target.z;
     const T = dist / speed;
-    const scale = def.special ? 0.5 : 0.35;
+    const g = GRAVITY * k * k;
+    const scale = (def.special ? 0.5 : 0.35) * k * k;
     const brk = new THREE.Vector3(def.brk[0] * scale * (pc.hang ? 0.45 : 1), def.brk[1] * scale * (pc.hang ? 0.45 : 1), 0);
     const late = def.late;
     // break displacement at T = 0.5*brk*T^2
@@ -657,9 +738,9 @@ export class Game {
       .copy(target)
       .sub(p0)
       .addScaledVector(brk, -0.5 * T * T)
-      .add(new THREE.Vector3(0, 0.5 * GRAVITY * T * T, 0))
+      .add(new THREE.Vector3(0, 0.5 * g * T * T, 0))
       .divideScalar(T);
-    this.ball.startPitch({ p0, v0, brk, T, late, knuckle: !!def.knuckle, seed: Math.random() * 10 });
+    this.ball.startPitch({ p0, v0, brk, T, g, late, knuckle: !!def.knuckle, seed: Math.random() * 10 });
     pc.T = T;
     pc.cross = target.clone();
     pc.tCatch = this.findCatchTime();
@@ -1175,6 +1256,13 @@ export class Game {
         this.fx.impact(this.fielders.C.gloveWorld(new THREE.Vector3()), 0xff4a5e, 0.8);
         this.recordOut(1);
         this.afterPitchNext = 'nextBatter';
+        this.afterWait = 1.9;
+        this.batter.struckOut = true;
+        this.fx.after(0.7, () => {
+          if (!this.batter.struckOut) return;
+          this.batterRig.release();
+          this.batter.char.play('dejected', { fade: 0.4 });
+        });
       } else {
         this.hud.message(call === 'swingStrike' ? '헛스윙!' : 'STRIKE!', '', 'gold', 0.9);
         this.afterPitchNext = 'pitch';
@@ -1334,8 +1422,8 @@ export class Game {
     if (this.outs >= 3) return this.endHalf();
     if (this.checkWalkoff()) return;
     if (this.afterPitchNext === 'nextBatter') {
-      if (this.batter.char.role === 'batter') this.releaseOffense(this.batter.char);
-      this.newBatter();
+      if (this.batter.char.role === 'batter') this.batterWalkOff(this.batter.char);
+      this.newBatter(true);
     } else this.enterPrePitch();
   }
 
@@ -1369,7 +1457,7 @@ export class Game {
       this.enterPrePitch();
     } else {
       if (this.batter.char.role === 'batter') this.releaseOffense(this.batter.char);
-      this.newBatter();
+      this.newBatter(true);
     }
   }
 
@@ -1448,7 +1536,7 @@ export class Game {
       }
     }
     // fielders returning to their positions between pitches
-    if (this.state === 'prePitch' || this.state === 'afterPitch' || this.state === 'windup' || this.state === 'pitchFlight' || this.state === 'special') {
+    if (this.state === 'prePitch' || this.state === 'afterPitch' || this.state === 'windup' || this.state === 'pitchFlight' || this.state === 'special' || this.state === 'batterChange') {
       for (const pos of POS_ORDER) {
         if (pos === 'P' || pos === 'C') continue;
         const f = this.fielders[pos];
@@ -1472,6 +1560,7 @@ export class Game {
         for (const pos of ['1B', '2B', 'SS', '3B', 'LF', 'CF', 'RF']) this.fielders[pos].play('readyPounce', { fade: 0.15 });
       }
     }
+    this.updateMovers(dt);
     this.batterRig.update(dt);
     // everybody on the field follows the ball with their eyes
     const ballVisible = this.ball.mesh.visible && this.state !== 'title';
