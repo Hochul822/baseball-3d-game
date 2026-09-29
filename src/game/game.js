@@ -173,11 +173,14 @@ export class Game {
   start(opts) {
     this.opts = opts;
     this.diff = opts.diff;
-    this.userTeam = opts.team; // user team index (plays at home)
-    const awayIdx = 1 - opts.team;
-    // teams[0] = away (bats top), teams[1] = home (user)
-    this.rosters = [buildRoster(awayIdx), buildRoster(opts.team)];
-    this.teams = [TEAMS[awayIdx], TEAMS[opts.team]];
+    this.userTeam = opts.team;
+    // teams[0] = away (bats in the top half), teams[1] = home.
+    // Choosing to bat first makes the user the visiting team.
+    this.userSide = opts.first === 'bat' ? 0 : 1;
+    const cpuTeam = 1 - opts.team;
+    const idx = this.userSide === 1 ? [cpuTeam, opts.team] : [opts.team, cpuTeam];
+    this.rosters = idx.map((i) => buildRoster(i));
+    this.teams = idx.map((i) => TEAMS[i]);
     this.innings = opts.innings;
     this.inning = 1;
     this.half = 0;
@@ -203,7 +206,7 @@ export class Game {
   }
 
   get userBatting() {
-    return this.half === 1;
+    return this.half === (this.userSide ?? 1);
   }
   get offRoster() {
     return this.rosters[this.half];
@@ -365,6 +368,7 @@ export class Game {
   pushScore() {
     this.hud.setScore({ score: this.score, inning: this.inning, half: this.half, bases: this.bases, balls: this.balls, strikes: this.strikes, outs: this.outs });
     this.env.stadium.drawScoreboard({
+      teams: this.teams,
       inning: this.inning,
       half: this.half,
       score: this.score,
@@ -432,7 +436,7 @@ export class Game {
     } else {
       this.rig.shot(PITCH_CAM.pos, PITCH_CAM.look, { fov: PITCH_CAM.fov, stiff: 5, cut: cutCam });
       this.refreshPitchMenu();
-      this.hud.hint('구종 선택 · 마우스로 코스 조준 · <b>클릭</b>으로 투구 게이지 시작');
+      this.hud.hint('구종 선택 · 마우스로 코스 조준 · <b>클릭</b>으로 투구 게이지 시작 · 타구가 나오면 <b>SPACE</b>로 수비!');
     }
   }
 
@@ -483,6 +487,10 @@ export class Game {
   // ======================================================================
   onKey(code, shift) {
     if (this.state === 'title' || this.state === 'over') return;
+    if (this.state === 'inPlay') {
+      if (this.play && ['Space', 'Enter', 'KeyF'].includes(code)) this.play.onDefenseInput();
+      return;
+    }
     if (!this.userBatting) {
       const p = ALL_PITCHES.find((x) => 'Key' + x.key === code || 'Digit' + x.key === code);
       if (p) this.selectPitch(p.id);
@@ -501,6 +509,10 @@ export class Game {
 
   onMouseDown(button, shift) {
     if (this.state === 'title' || this.state === 'over') return;
+    if (this.state === 'inPlay') {
+      this.play?.onDefenseInput();
+      return;
+    }
     const hit = this.env.input.planeHit(this.camera, CONTACT_Z);
     if (this.userBatting) {
       if (hit && !this.autoplay) this.pci.set(clamp(hit.x, -0.62, 0.62), clamp(hit.y, 0.2, 1.5));
@@ -1499,7 +1511,8 @@ export class Game {
     this.hud.clearBottom();
     this.hud.cursor('none');
     this.hud.drawZone(null, false);
-    const userWin = this.score[1] > this.score[0];
+    const us = this.userSide ?? 1;
+    const userWin = this.score[us] > this.score[1 - us];
     if (walkoff) this.hud.message('끝내기!!', 'WALK-OFF WIN', 'gold', 3);
     if (userWin) {
       this.fx.fireworks(new THREE.Vector3(0, 0, 60), 14);
@@ -1509,7 +1522,7 @@ export class Game {
       for (let i = 0; i < 8; i++) this.fx.after(i * 0.35, () => this.audio.firework());
     }
     this.rig.orbitAround(new THREE.Vector3(0, 0, 18), 34, 16, 0.12, { fov: 50 });
-    this.fx.after(walkoff ? 3.2 : 1.5, () => this.hud.gameOver(this.score, this.teams, 1, () => this.env.restart()));
+    this.fx.after(walkoff ? 3.2 : 1.5, () => this.hud.gameOver(this.score, this.teams, us, () => this.env.restart()));
   }
 
   // ======================================================================

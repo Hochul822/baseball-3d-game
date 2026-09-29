@@ -32,6 +32,13 @@ export class Play {
     this.msgShown = false;
     this.bunt = info.special === 'bunt';
     this.startOuts = game.outs;
+    // user-controlled defense: timing inputs boost the fielders
+    this.userDef = !game.userBatting && !game.autoplay && !info.foulTip;
+    this.qte = null;
+    this.qteCatchDone = false;
+    this.catchBoost = false;
+    this.throwBoost = false;
+    this.QTE_WIN = { easy: 0.2, normal: 0.14, hard: 0.1 }[game.diff] ?? 0.14;
 
     // runners
     this.runners = [];
@@ -81,6 +88,7 @@ export class Play {
     });
     if (info.foulTip) this.foulBall(true);
     this.lastPlan = 0;
+    if (this.userDef) g.hud.hint('🧤 수비: 원이 노란 원에 겹칠 때 <b>SPACE / 클릭</b> → 호수비 · 공을 잡으면 바로 <b>SPACE</b> → 강송구');
   }
 
   runSpeed(p) {
@@ -106,7 +114,7 @@ export class Play {
       if (f.hasBall) continue;
       const fp = flat(f.root.position);
       const react = initial ? (pos === 'P' ? 0.45 : pos === 'C' ? 0.35 : OUTFIELD.includes(pos) ? 0.3 : 0.18) : 0.05;
-      const vmax = OUTFIELD.includes(pos) ? 8.2 : pos === 'C' || pos === 'P' ? 6.6 : 7.6;
+      const vmax = (OUTFIELD.includes(pos) ? 8.2 : pos === 'C' || pos === 'P' ? 6.6 : 7.6) * (this.catchBoost ? 1.25 : 1);
       let found = null;
       let fallback = null;
       for (let i = 0; i < pred.samples.length; i += 2) {
@@ -118,12 +126,12 @@ export class Play {
         const d = Math.max(0, fp.distanceTo(flat(s.p)) - 0.6);
         const need = react + (d > 0 ? d / vmax + 0.25 : 0);
         if (need <= s.t) {
-          found = { t: s.t, p: s.p.clone(), air: s.air, i };
+          found = { t: s.t, tReal: s.t, p: s.p.clone(), air: s.air, i };
           break;
         }
         if (s.t < 0.3) continue;
         const late = need - s.t;
-        if (!fallback || late < fallback.late) fallback = { t: need + late * 2, p: s.p.clone(), air: s.air, late, i };
+        if (!fallback || late < fallback.late) fallback = { t: need + late * 2, tReal: need, p: s.p.clone(), air: s.air, late, i };
       }
       const pick = found || fallback;
       if (!pick) continue;
@@ -156,6 +164,7 @@ export class Play {
       best = { ...bestAir, clean: true };
     }
     this.intercept = best;
+    if (best) this.interceptAt = this.t + Math.min(best.tReal ?? best.t, 8);
     // assign roles
     const chaser = this.chaser;
     const spray = sprayAngle(b.v.x || 0.001, b.v.z || 0.001);
@@ -233,6 +242,7 @@ export class Play {
       if (this.t > 0.3) this.replanIfNeeded();
     }
     this.updateFielders(dt);
+    this.updateQTE();
     this.updateRunners(dt);
     this.checkBall(dt);
     // batter drops the bat
@@ -317,7 +327,7 @@ export class Play {
         const d = new THREE.Vector3().subVectors(goal, p);
         d.y = 0;
         const L = d.length();
-        const vmax = (OUTFIELD.includes(pos) ? 8.2 : pos === 'C' || pos === 'P' ? 6.6 : 7.6) * (f.hasBall ? 0.9 : 1);
+        const vmax = (OUTFIELD.includes(pos) ? 8.2 : pos === 'C' || pos === 'P' ? 6.6 : 7.6) * (f.hasBall ? 0.9 : 1) * (this.catchBoost ? 1.25 : 1);
         if (L > 0.25) {
           f.v = Math.min(vmax, (f.v || 0) + dt * 14);
           const step = Math.min(L, f.v * dt);
@@ -363,23 +373,24 @@ export class Play {
     // wall jump catch
     const r = Math.hypot(bp.x, bp.z);
     const fr = fenceDistance(sprayAngle(bp.x, bp.z));
-    if (air && OUTFIELD.includes(pos) && fr - r < 3.5 && bp.y > REACH_H && bp.y < WALL_H + 1.4 && hd < 2.2 && !f.jumping && ball.v.y < 0) {
+    const cb = this.catchBoost;
+    if (air && OUTFIELD.includes(pos) && fr - r < 3.5 && bp.y > REACH_H && bp.y < WALL_H + (cb ? 2.0 : 1.4) && hd < (cb ? 3.2 : 2.2) && !f.jumping && ball.v.y < 0) {
       this.startJump(f);
       return;
     }
     const slow = Math.hypot(ball.v.x, ball.v.z) < 3 && bp.y < 0.5;
-    if ((hd < 0.95 || (slow && hd < 1.4)) && bp.y < REACH_H + 0.15) {
+    if ((hd < (cb ? 1.6 : 0.95) || (slow && hd < 1.4)) && bp.y < REACH_H + (cb ? 0.6 : 0.15)) {
       this.catchBall(f, pos, air);
       return;
     }
     // dive
     const late = !this.intercept || !this.intercept.clean;
-    if (!f.diving && late && hd < 3.2 && hd > 1.1 && bp.y < 1.6 && (air || Math.hypot(ball.v.x, ball.v.z) > 9)) {
+    if (!f.diving && (late || cb) && hd < (cb ? 4.2 : 3.2) && hd > (cb ? 1.7 : 1.1) && bp.y < (cb ? 2.0 : 1.6) && (air || Math.hypot(ball.v.x, ball.v.z) > 9)) {
       const rel = new THREE.Vector3().subVectors(flat(bp), flat(p));
       const vel = new THREE.Vector3(ball.v.x, 0, ball.v.z);
       const closing = -rel.dot(vel) / Math.max(1, rel.length());
       const tti = rel.length() / Math.max(1, closing);
-      if (closing > 0 && tti < 0.35 && Math.random() < 0.8) this.startDive(f, rel);
+      if (closing > 0 && tti < (cb ? 0.45 : 0.35) && (cb || Math.random() < 0.8)) this.startDive(f, rel);
     }
   }
 
@@ -401,7 +412,7 @@ export class Play {
     f.root.position.y = Math.max(0, Math.sin(Math.min(k / 0.45, 1) * Math.PI) * 0.35) + (f.tilt > 1.2 ? 0.1 : 0);
     const ball = this.ball;
     const glove = f.gloveWorld(new THREE.Vector3());
-    if (!d.caught && ball.mode === 'flight' && glove.distanceTo(ball.p) < 0.85 + (k < 0.4 ? 0.4 : 0)) {
+    if (!d.caught && ball.mode === 'flight' && glove.distanceTo(ball.p) < 0.85 + (k < 0.4 ? 0.4 : 0) + (this.catchBoost ? 0.9 : 0)) {
       d.caught = true;
       const st = ball.state;
       const air = st && st.bounces === 0 && !st.rolling;
@@ -437,7 +448,7 @@ export class Play {
     const ball = this.ball;
     const glove = new THREE.Vector3().setFromMatrixPosition(f.bones.handL.matrixWorld);
     f.reach('L', ball.p.clone(), 1);
-    if (!j.caught && ball.mode === 'flight' && glove.distanceTo(ball.p) < 1.0) {
+    if (!j.caught && ball.mode === 'flight' && glove.distanceTo(ball.p) < (this.catchBoost ? 1.8 : 1.0)) {
       j.caught = true;
       const robbed = ball.state.overWall || ball.p.y > WALL_H - 0.3;
       if (ball.state.overWall) ball.state.overWall = false;
@@ -516,7 +527,95 @@ export class Play {
     f.st = 'hasBall';
     f.runTo = null;
     f.goal = null;
+    if (this.qte && this.qte.kind === 'catch') this.resolveQTE(false, true);
+    if (this.userDef && !this.throwQteDone && this.g.outs < 3) {
+      // give the player a short window to fire a quick, strong throw
+      this.throwQteDone = true;
+      this.qte = { kind: 'throw', start: this.t, target: this.t + 0.75, f };
+      return;
+    }
     this.g.fx.after(delay, () => this.decideThrow(f));
+  }
+
+  // ------------------------------------------------------------------
+  // Defensive timing inputs (QTE)
+  // ------------------------------------------------------------------
+  updateQTE() {
+    const g = this.g;
+    if (!this.userDef) return;
+    if (this.result || this.dead || this.homerun || g.outs >= 3) {
+      if (this.qte) {
+        const q = this.qte;
+        this.qte = null;
+        if (q.kind === 'throw' && q.f.hasBall) this.decideThrow(q.f);
+      }
+      g.hud.qte(null);
+      return;
+    }
+    if (!this.qte && !this.qteCatchDone && !this.holder && this.ball.mode === 'flight' && this.interceptAt && this.t > 0.12) {
+      const remain = this.interceptAt - this.t;
+      if (remain < 1.15) this.qte = { kind: 'catch', start: this.t, target: Math.max(this.interceptAt, this.t + 0.45) };
+    }
+    const q = this.qte;
+    if (!q) return g.hud.qte(null);
+    if (q.kind === 'catch') {
+      // follow re-plans, but never let the ring jump backwards abruptly
+      if (this.interceptAt && Math.abs(this.interceptAt - q.target) < 0.5 && this.interceptAt > this.t + 0.2) q.target = this.interceptAt;
+      if (this.t > q.target + this.QTE_WIN) return this.resolveQTE(false);
+      const k = THREE.MathUtils.clamp((q.target - this.t) / Math.max(0.3, q.target - q.start), 0, 1);
+      g.hud.qte({ kind: 'catch', label: '호수비 타이밍!', progress: k, inWindow: Math.abs(this.t - q.target) <= this.QTE_WIN });
+    } else {
+      if (!q.f.hasBall) {
+        this.qte = null;
+        return g.hud.qte(null);
+      }
+      if (this.t > q.target) return this.resolveQTE(false);
+      const k = THREE.MathUtils.clamp((q.target - this.t) / (q.target - q.start), 0, 1);
+      g.hud.qte({ kind: 'throw', label: '강송구!', progress: k, inWindow: true });
+    }
+    if (g.autoQTE && q.kind === 'catch' && Math.abs(this.t - q.target) < 0.02) this.onDefenseInput();
+    if (g.autoQTE && q.kind === 'throw' && this.t - q.start > 0.2) this.onDefenseInput();
+  }
+
+  onDefenseInput() {
+    const q = this.qte;
+    if (!this.userDef || !q) return;
+    if (q.kind === 'catch') {
+      const err = Math.abs(this.t - q.target);
+      if (err <= this.QTE_WIN) this.resolveQTE(true, false, err <= this.QTE_WIN * 0.4 ? 'PERFECT!' : 'GOOD!');
+      else this.resolveQTE(false, false, this.t < q.target ? '너무 빨라요!' : 'MISS');
+    } else this.resolveQTE(true, false, '강송구!');
+  }
+
+  resolveQTE(ok, silent = false, text = null) {
+    const g = this.g;
+    const q = this.qte;
+    if (!q) return;
+    this.qte = null;
+    g.hud.qte(null);
+    if (q.kind === 'catch') {
+      this.qteCatchDone = true;
+      if (ok) {
+        this.catchBoost = true;
+        const f = this.F[this.chaser];
+        if (f) {
+          g.fx.ring(f.root.position.clone().setY(0.05), { color: 0x5cffb0, size: 4, life: 0.5, face: 'up' });
+          g.fx.aura(f, 'wind', 1.2);
+        }
+        g.audio.chime();
+        g.addGauge(true, 5);
+        this.plan();
+      }
+      if (!silent) g.hud.qteResult(text || (ok ? 'GOOD!' : 'MISS'), ok);
+    } else {
+      if (ok) {
+        this.throwBoost = true;
+        g.audio.chime();
+        g.addGauge(true, 3);
+      }
+      if (!silent) g.hud.qteResult(text || (ok ? '강송구!' : '송구'), ok);
+      if (q.f.hasBall) this.decideThrow(q.f);
+    }
   }
 
   // ------------------------------------------------------------------
@@ -540,7 +639,8 @@ export class Play {
       const covTime = cov === f ? 0 : flat(cov.root.position).distanceTo(flat(bp)) / 7.5;
       const dBase = P.distanceTo(flat(bp));
       const runIt = dBase < 7 || cov === f;
-      const throwTime = runIt ? dBase / 7 : 0.42 + dBase / (OUTFIELD.includes(f.pos) ? 34 : 31);
+      const tb = this.throwBoost ? 1.35 : 1;
+      const throwTime = runIt ? dBase / 7 : (this.throwBoost ? 0.25 : 0.42) + dBase / ((OUTFIELD.includes(f.pos) ? 34 : 31) * tb);
       const margin = remain - Math.max(throwTime, covTime * 0.9);
       if (margin > 0.03) {
         const score = b * 10 + (r.forced ? 3 : 0) + margin;
@@ -576,7 +676,7 @@ export class Play {
     const tgt = receiver.goal ? receiver.goal.clone() : BASES[base % 4].clone();
     const dir = new THREE.Vector3().subVectors(tgt, f.root.position);
     f.root.rotation.y = Math.atan2(dir.x, dir.z);
-    f.play('throw', { fade: 0.08, speed: OUTFIELD.includes(f.pos) ? 1.0 : 1.35 });
+    f.play('throw', { fade: 0.08, speed: (OUTFIELD.includes(f.pos) ? 1.0 : 1.35) * (this.throwBoost ? 1.4 : 1) });
     receiver.receiving = true;
     // glove-to-hand transfer
     this.g.fx.after(0.08, () => {
@@ -590,11 +690,15 @@ export class Play {
       f.hasBall = false;
       this.holder = null;
       const to = (receiver.root.position.distanceTo(tgt) < 3 ? receiver.root.position.clone() : tgt.clone()).setY(1.25);
-      const speed = OUTFIELD.includes(f.pos) ? 36 : f.pos === 'C' ? 34 : 31;
+      const speed = (OUTFIELD.includes(f.pos) ? 36 : f.pos === 'C' ? 34 : 31) * (this.throwBoost ? 1.35 : 1);
       const dur = this.ball.throwTo(from, to, speed);
+      if (this.throwBoost) {
+        g.fx.impact(from, 0x5cffb0, 0.5);
+        g.hitTrail.setColor(0x5cffb0, 2.0);
+      }
       g.hitTrail.reset();
-      g.hitTrail.setColor(0xffffff, 1.0);
-      g.hitTrail.width = 0.04;
+      g.hitTrail.setColor(this.throwBoost ? 0x5cffb0 : 0xffffff, this.throwBoost ? 2.0 : 1.0);
+      g.hitTrail.width = this.throwBoost ? 0.07 : 0.04;
       g.hitTrail.active = true;
       g.audio.whoosh(0.2, 1.2);
       this.inFlightThrow = { base, receiver, cutoff, arrive: this.t + dur };
@@ -1015,6 +1119,7 @@ export class Play {
   finish() {
     if (this.result) return 'done';
     const g = this.g;
+    g.hud.qte(null);
     // place surviving runners on bases
     const bases = [null, null, null, null];
     let batterBase = null;

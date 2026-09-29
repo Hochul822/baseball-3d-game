@@ -24,13 +24,17 @@ export class HUD {
   // ------------------------------------------------------------------ title
   showTitle(onStart) {
     this.clear();
-    const ov = el('div', 'overlay');
+    const ov = el('div', 'overlay title');
     ov.innerHTML = `
       <div class="logo"><span class="k">K-MAJOR</span><span class="b">BASEBALL</span></div>
       <div class="tagline">MLB × KBO  ·  TOON STADIUM  ·  SPECIAL SKILLS</div>
       <div class="opts">
-        <div class="opt"><h4>내 팀 (홈)</h4><div class="choices" data-k="team">
+        <div class="opt"><h4>내 팀</h4><div class="choices" data-k="team">
           ${TEAMS.map((t, i) => `<button data-v="${i}" class="${i === 0 ? 'sel' : ''}"><span class="teamchip" style="background:${hex(t.primary)}"></span>${t.name}</button>`).join('')}
+        </div></div>
+        <div class="opt"><h4>선공 / 후공</h4><div class="choices" data-k="first">
+          <button data-v="bat">⚾ 공격 먼저 <small>(원정팀 · 1회초 공격)</small></button>
+          <button data-v="field" class="sel">🧤 수비 먼저 <small>(홈팀 · 1회초 수비)</small></button>
         </div></div>
         <div class="opt"><h4>이닝</h4><div class="choices" data-k="innings">
           ${[1, 3, 5, 9].map((n) => `<button data-v="${n}" class="${n === 3 ? 'sel' : ''}">${n}회</button>`).join('')}
@@ -50,9 +54,12 @@ export class HUD {
           <p><kbd>1</kbd>~<kbd>9</kbd> 구종 선택 · <kbd>Q</kbd><kbd>W</kbd><kbd>R</kbd> 필살 마구</p>
           <p><kbd>마우스</kbd>/<kbd>WASD</kbd> 코스 조준</p>
           <p><kbd>클릭</kbd>/<kbd>Space</kbd> 1회: 게이지 시작 → 2회: 노란 구간에서 멈추기</p>
-          <p><kbd>P</kbd> 1루 견제 · 수비는 자동 (다이빙·점프캐치·병살)</p></div>
+          <p><kbd>P</kbd> 1루 견제</p></div>
+        <div class="wide"><h5>🧤 수비 (타구가 나왔을 때)</h5>
+          <p>① 화면의 <b>줄어드는 원</b>이 노란 원에 겹치는 순간 <kbd>SPACE</kbd>/<kbd>클릭</kbd> → <b>호수비</b>: 수비수 이동속도↑, 포구 범위↑, 다이빙·점프캐치 성공</p>
+          <p>② 공을 잡은 직후 <kbd>SPACE</kbd>/<kbd>클릭</kbd> → <b>강송구</b>: 더 빠른 송구로 주자 아웃·병살 확률↑ (안 누르면 평범한 송구)</p></div>
       </div>`;
-    const opts = { team: 0, innings: 3, diff: 'normal' };
+    const opts = { team: 0, innings: 3, diff: 'normal', first: 'field' };
     ov.querySelectorAll('.choices').forEach((c) => {
       c.addEventListener('click', (e) => {
         const b = e.target.closest('button');
@@ -60,7 +67,7 @@ export class HUD {
         c.querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
         b.classList.add('sel');
         const k = c.dataset.k;
-        opts[k] = k === 'diff' ? b.dataset.v : Number(b.dataset.v);
+        opts[k] = k === 'diff' || k === 'first' ? b.dataset.v : Number(b.dataset.v);
       });
     });
     ov.querySelector('.start').addEventListener('click', () => onStart(opts));
@@ -311,6 +318,32 @@ export class HUD {
       h.style.left = x + 'px';
       h.style.top = y + 'px';
     }
+  }
+
+  /** Defensive timing prompt: {kind, label, progress 1->0, inWindow} or null */
+  qte(state) {
+    let q = this.layers.qte;
+    if (!state) {
+      if (q) q.style.display = 'none';
+      return;
+    }
+    if (!q) {
+      q = el('div', 'qte', `<svg viewBox="0 0 160 160"><circle class="tgt" cx="80" cy="80" r="40"/><circle class="shr" cx="80" cy="80" r="70"/></svg><div class="key">SPACE</div><div class="lbl"></div><div class="sub">또는 클릭</div>`);
+      this.root.appendChild(q);
+      this.layers.qte = q;
+    }
+    q.style.display = 'block';
+    q.className = 'qte ' + state.kind + (state.inWindow ? ' hot' : '');
+    q.querySelector('.lbl').textContent = state.label;
+    const shr = q.querySelector('.shr');
+    if (state.kind === 'catch') shr.setAttribute('r', String(40 + state.progress * 36));
+    else shr.setAttribute('r', String(40 * state.progress + 0.01));
+  }
+
+  qteResult(text, ok) {
+    const r = el('div', 'qte-res ' + (ok ? 'ok' : 'ng'), text);
+    this.root.appendChild(r);
+    setTimeout(() => r.remove(), 1100);
   }
 
   meter(state) {

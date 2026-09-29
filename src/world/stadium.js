@@ -660,7 +660,7 @@ export class Stadium {
     for (let i = 0; i < W; i += 8) x.fillRect(i, 0, 2, H);
     x.font = 'bold 60px "Black Han Sans", "Arial Black", sans-serif';
     x.textBaseline = 'middle';
-    const teams = [TEAMS[1], TEAMS[0]];
+    const teams = s.teams || [TEAMS[1], TEAMS[0]];
     // header
     x.fillStyle = '#ffcc00';
     x.textAlign = 'left';
